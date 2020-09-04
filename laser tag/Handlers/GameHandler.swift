@@ -15,11 +15,14 @@ protocol GameHandlerDelegate {
     func setAmmoInGunLabel(string: String)
     func setTotalAmmoLabel(string: String)
     func setAlertLabel(string: String)
-    func updateKillsLabel()
+    func updateScoreLabel()
     func updateDeathsLabel()
     func updateTableView(teamsSorted: [Team], playersInYourTeam: [Player])
     func updateTableView(playersSorted: [Player])
     func switchToDeathScreen(string: String)
+    func setShieldBar()
+    func setBackgroundWhite()
+    func setBackgroundNormal()
 }
 
 struct Team {
@@ -32,7 +35,7 @@ class GameHandler {
     
     var gameViewController: GameHandlerDelegate!
     
-    var gameTime = Double(Game.timeLimit*60)
+    var gameTimeElapsed = Double(0)
     var timer = Timer()
     
     var playerSelf: Player!
@@ -50,98 +53,135 @@ class GameHandler {
     var fullAutoAmmo = 30
     var singleShotAmmo = 10
     
+    let dummyPlayer = Player(username: "dummy", team: -1, gunType: -1, gunID: -1, isSelf: false, kills: -1, deaths: -1, score: -1)
+    
+    //time oddball is first recieved
+    var timeAtOddballRecieved: Int!
+    var oddballReceived = false
+    var playerWithOddball: Player!
+    var scoreIncremented = false
+    
+    var isRespawning = false
+    var timeRespawnedAt: Double!
+    var respawnInvincibilityDelay = 1.5
+    
     init() {
         for player in Players {
             if player.isSelf {
                 playerSelf = player
             }
         }
+        playerWithOddball = dummyPlayer
     }
     
     
-    func timerStart(){
+    func gameTimeStart(){
         //print("starting timer")
-        timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(handleTimerLabel), userInfo: nil, repeats: true)
+        timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(handleGameTime), userInfo: nil, repeats: true)
         let runLoop = RunLoop.current
         runLoop.add(timer, forMode: .default)
         runLoop.run()
     }
     
-    @objc func handleTimerLabel(){
-        let timerString = timerHandler()
-        //print("handling timer")
-        DispatchQueue.main.async {
-            self.gameViewController.setTimerLabel(string: timerString)
-        }
+    @objc func handleGameTime() {
         
-    }
-    
-    func timerHandler() -> String {
+        gameTimeElapsed += 0.1
         
-        gameTime -= 0.1
-        // print(timerCounter)
-        
-        let flooredCounter = Int(gameTime)
-        let hour = flooredCounter/3600
-        
-        let minute = (flooredCounter % 3600) / 60
-        var minuteString = "\(minute)"
-        if minute < 10 {
-            minuteString = "0\(minute)"
-        }
-        
-        let second = (flooredCounter % 3600) % 60
-        var secondString = "\(second)"
-        if second < 10 {
-            secondString = "0\(second)"
-        }
-        
-        let decisecond = String(format: "%.1f", gameTime).components(separatedBy: ".").last!
-        
-        
-        if ((Game.timeLimit * 60) - Int(gameTime)) % 10 == 0 && networking.isAdmin {
-            if sendTimeSync {
-                sendTimeSync = false
-                let coefficient = Int(gameTime / 255)
-                let remainder = Int(gameTime) % 255
-                print("SYNCING TIME: coefficient: \(coefficient), remainder: \(remainder), gameTime: \(gameTime) ")
-                networking.syncTime(coefficient: coefficient, remainder: Int(remainder))
+        if Game.timeLimit > 0 {
+            let flooredCounter = Int(Double((Game.timeLimit * 60)) - gameTimeElapsed)
+            let hour = flooredCounter/3600
+            
+            let minute = (flooredCounter % 3600) / 60
+            var minuteString = "\(minute)"
+            if minute < 10 {
+                minuteString = "0\(minute)"
             }
             
-        } else {
-            sendTimeSync = true
-        }
-        
-        if  flooredCounter >= 0 {
-            //only display hour if there are more than 60 minutes and only display minutes if there are more than 60 seconds
-            if flooredCounter > 3600{
+            let second = (flooredCounter % 3600) % 60
+            var secondString = "\(second)"
+            if second < 10 {
+                secondString = "0\(second)"
+            }
+            
+            let decisecond = String(format: "%.1f", Double((Game.timeLimit * 60)) - gameTimeElapsed).components(separatedBy: ".").last!
+            
+            
+            if Int(gameTimeElapsed) % 10 == 0 && networking.isAdmin {
+                if sendTimeSync {
+                    sendTimeSync = false
+                    let coefficient = Int(gameTimeElapsed / 255)
+                    let remainder = Int(gameTimeElapsed) % 255
+                    print("SYNCING TIME: coefficient: \(coefficient), remainder: \(remainder), gameTimeElapsed: \(gameTimeElapsed) ")
+                    networking.syncTime(coefficient: coefficient, remainder: Int(remainder))
+                }
                 
-                return "\(hour):\(minuteString):\(secondString)"
-            } else if flooredCounter > 60 {
-                
-                return "\(minuteString):\(secondString)"
             } else {
-                
-                return "\(secondString).\(decisecond)"
-            }
-        } else if flooredCounter < 0 {
-            timer.invalidate()
-            DispatchQueue.main.async {
-                networking.endGame()
+                sendTimeSync = true
             }
             
+            var timeString: String
+            if  flooredCounter >= 0 {
+                //only display hour if there are more than 60 minutes and only display minutes if there are more than 60 seconds
+                if flooredCounter > 3600{
+                    
+                    timeString = "\(hour):\(minuteString):\(secondString)"
+                } else if flooredCounter > 60 {
+                    
+                    timeString = "\(minuteString):\(secondString)"
+                } else {
+                    
+                    timeString = "\(secondString).\(decisecond)"
+                }
+                
+                DispatchQueue.main.async {
+                    self.gameViewController.setTimerLabel(string: timeString)
+                }
+            } else if flooredCounter < 0 {
+                timer.invalidate()
+                DispatchQueue.main.async {
+                    networking.endGame()
+                }
+                
+            }
         }
         
-        return ""
+        if oddballReceived {
+            if (Int(gameTimeElapsed) - timeAtOddballRecieved) % 5 == 0 {
+                if !scoreIncremented {
+                    networking.scoreIncrease()
+                    scoreIncremented = true
+                }
+                
+            } else {
+                scoreIncremented = false
+            }
+        }
+        
+        if isRespawning {
+            
+            if (gameTimeElapsed - timeRespawnedAt) >= respawnInvincibilityDelay {
+                
+                isDead = false
+                isRespawning = false
+                
+                
+            }
+        }
+        
     }
     
     // handles respawning as well as refilling ammo and health
     func respawn() {
         playerSelf.health = 100
+        //playerSelf.shield = 0
         playerSelf.totalAmmo = Game.ammo
         gameViewController.setHealthBar()
-        isDead = false
         handleReload()
+        
+        if isDead {
+            timeRespawnedAt = gameTimeElapsed
+            isRespawning = true
+        }
     }
     
     func onPlayerHit(gunID: Int){
@@ -151,77 +191,114 @@ class GameHandler {
                 if gunID == player.gunID {
                     print("found player shooting")
                     playerShooting = player
+                    break
+                } else {
+                    playerShooting = dummyPlayer
                 }
             }
             print(playerSelf.health)
-            if Game.teamSetting == 0 {
-                switch playerShooting.gunType {
-                case 0://sniper
-                    playerSelf.health -= sniperDamage
-                case 1://burst
-                    playerSelf.health -= burstDamage
-                case 2://full auto
-                    playerSelf.health -= fullAutoDamage
-                case 3://single shot
-                    playerSelf.health -= singleShotDamage
-                default:
-                    break;
-                }
-                
-                
-                
-                if playerSelf.health <= 0 {
-                    networking.sendPlayerKilled(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
-                    bluetooth.syncGun()
-                    bluetooth.setReload(gunID: playerSelf.gunID)
-                    isDead = true
-                    gameViewController.setHealthBar()
-                    //  gameViewController.switchToDeathScreen(string: "Killed by \(playerShooting.username)")
-                    //bluetooth.syncGun()
+            if playerShooting.gunID != -1 {
+                if Game.teamSetting == 0 {
+                    if playerSelf.shield > 0 {
+                        switch playerShooting.gunType {
+                        case 0://sniper
+                            playerSelf.shield -= sniperDamage
+                        case 1://burst
+                            playerSelf.shield -= burstDamage
+                        case 2://full auto
+                            playerSelf.shield -= fullAutoDamage
+                        case 3://single shot
+                            playerSelf.shield -= singleShotDamage
+                        default:
+                            break;
+                        }
+                        gameViewController.setShieldBar()
+                        gameViewController.flashRed()
+                    } else {
+                        switch playerShooting.gunType {
+                        case 0://sniper
+                            playerSelf.health -= sniperDamage
+                        case 1://burst
+                            playerSelf.health -= burstDamage
+                        case 2://full auto
+                            playerSelf.health -= fullAutoDamage
+                        case 3://single shot
+                            playerSelf.health -= singleShotDamage
+                        default:
+                            break;
+                        }
+                        
+                        
+                        
+                        if playerSelf.health <= 0 {
+                            networking.sendPlayerKilled(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
+                            // bluetooth.syncGun()
+                            bluetooth.setReload(gunID: playerSelf.gunID)
+                            isDead = true
+                            gameViewController.setHealthBar()
+                            //  gameViewController.switchToDeathScreen(string: "Killed by \(playerShooting.username)")
+                            //bluetooth.syncGun()
+                            
+                        } else {
+                            networking.sendPlayerHit(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
+                            gameViewController.flashRed()
+                            gameViewController.setHealthBar()
+                        }
+                    }
+                    
                     
                 } else {
-                    networking.sendPlayerHit(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
-                    gameViewController.flashRed()
-                    gameViewController.setHealthBar()
-                }
-                
-            } else {
-                if playerShooting.team != playerSelf.team {
-                    switch playerShooting.gunType {
-                    case 0://sniper
-                        playerSelf.health -= sniperDamage
-                    case 1://burst
-                        playerSelf.health -= burstDamage
-                    case 2://full auto
-                        playerSelf.health -= fullAutoDamage
-                    case 3://single shot
-                        playerSelf.health -= singleShotDamage
-                    default:
-                        break;
-                    }
-                    
-                    
-                    
-                    if playerSelf.health <= 0 {
-                        networking.sendPlayerKilled(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
-                        bluetooth.syncGun()
-                        bluetooth.setReload(gunID: playerSelf.gunID)
-                        gameViewController.setHealthBar()
-                        // gameViewController.switchToDeathScreen(string: "Killed by \(playerShooting.username)")
-                        
-                        isDead = true
-                        //bluetooth.syncGun()
-                        
-                    } else {
-                        networking.sendPlayerHit(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
+                    if playerSelf.shield > 0 {
+                        switch playerShooting.gunType {
+                        case 0://sniper
+                            playerSelf.shield -= sniperDamage
+                        case 1://burst
+                            playerSelf.shield -= burstDamage
+                        case 2://full auto
+                            playerSelf.shield -= fullAutoDamage
+                        case 3://single shot
+                            playerSelf.shield -= singleShotDamage
+                        default:
+                            break;
+                        }
+                        gameViewController.setShieldBar()
                         gameViewController.flashRed()
-                        gameViewController.setHealthBar()
+                    } else {
+                        if playerShooting.team != playerSelf.team {
+                            switch playerShooting.gunType {
+                            case 0://sniper
+                                playerSelf.health -= sniperDamage
+                            case 1://burst
+                                playerSelf.health -= burstDamage
+                            case 2://full auto
+                                playerSelf.health -= fullAutoDamage
+                            case 3://single shot
+                                playerSelf.health -= singleShotDamage
+                            default:
+                                break;
+                            }
+                            
+                            
+                            
+                            if playerSelf.health <= 0 {
+                                networking.sendPlayerKilled(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
+                                // bluetooth.syncGun()
+                                bluetooth.setReload(gunID: playerSelf.gunID)
+                                gameViewController.setHealthBar()
+                                // gameViewController.switchToDeathScreen(string: "Killed by \(playerShooting.username)")
+                                
+                                isDead = true
+                                //bluetooth.syncGun()
+                                
+                            } else {
+                                networking.sendPlayerHit(shooterGunID: playerShooting.gunID, selfGunID: playerSelf.gunID)
+                                gameViewController.flashRed()
+                                gameViewController.setHealthBar()
+                            }
+                        }
                     }
-                    
                 }
-                
             }
-            
         }
         
     }
@@ -324,60 +401,115 @@ class GameHandler {
             playerSelf.totalAmmo += 45
         }
         
-        
-        if Game.teamSetting > 0 {
-            let teams = createTeams()
-            
-            gameViewController.updateTableView(teamsSorted: teams.sorted(by: {$0.score > $1.score}), playersInYourTeam: self.findPlayersInYourTeam())
-            gameViewController.updateKillsLabel()
-            gameViewController.updateDeathsLabel()
-            
-        } else {
-            gameViewController.updateTableView(playersSorted: Players.sorted(by: {$0.kills > $1.kills}))
-            gameViewController.updateKillsLabel()
-            gameViewController.updateDeathsLabel()
-            
-        }
-        
         var gameEnding = false
-        if Game.killLimit > 0 {
-            if Game.teamSetting > 0 {
-                let teams = createTeams()
-                for team in teams {
-                    if findTeamScore(team: team.team) >= Game.killLimit {
-                        networking.endGame()
-                        gameEnding = true
+        
+        if Game.gameType == 0 {
+            createInGameTableViews()
+            
+            if Game.scoreLimit > 0 {
+                if Game.teamSetting > 0 {
+                    let teams = createTeams()
+                    for team in teams {
+                        if findTeamScore(team: team.team) >= Game.scoreLimit {
+                            networking.endGame()
+                            gameEnding = true
+                        }
                     }
-                }
-            } else {
-                for player in Players {
-                    if player.kills >= Game.killLimit {
-                        networking.endGame()
-                        gameEnding = true
+                } else {//FFA
+                    for player in Players {
+                        if player.kills >= Game.scoreLimit {
+                            networking.endGame()
+                            gameEnding = true
+                        }
                     }
+                    
                 }
             }
         }
         
         if !gameEnding && playerHit.gunID == playerSelf.gunID {
+            if playerSelf.gunID == playerWithOddball.gunID {
+                networking.oddballLost()
+            }
             gameViewController.switchToDeathScreen(string: "Killed by \(playerShooting.username)")
         }
+    }
+    
+    func oddballReceived(gunID: Int) {
+        for player in Players {
+            if player.gunID == gunID {
+                playerWithOddball = player
+            }
+        }
         
+        if playerWithOddball.gunID == playerSelf.gunID {
+            playerSelf.shield = 100
+            oddballReceived = true
+            timeAtOddballRecieved = Int(gameTimeElapsed)
+            DispatchQueue.main.async {
+                self.gameViewController.setBackgroundWhite()
+            }
+        }
+        
+        DispatchQueue.main.async {
+            self.createInGameTableViews()
+            self.gameViewController.setShieldBar()
+            
+        }
         
     }
     
+    func scoreIncrease(gunID: Int) {
+        for player in Players {
+            if player.gunID == gunID {
+                player.score += 1
+                if player.score == 255 || player.score == Game.scoreLimit{
+                    timer.invalidate()
+                    networking.endGame()
+                }
+            }
+        }
+        
+        DispatchQueue.main.async {
+            self.createInGameTableViews()
+        }
+        
+    }
+    
+    func oddballLost() {
+        playerWithOddball = dummyPlayer
+        oddballReceived = false
+        DispatchQueue.main.async {
+            self.createInGameTableViews()
+            self.gameViewController.setBackgroundNormal()
+        }
+    }
+}
+
+
+extension GameHandler {
     func createInGameTableViews() {
         if Game.teamSetting > 0 {
             let teams = createTeams()
             
             gameViewController.updateTableView(teamsSorted: teams.sorted(by: {$0.score > $1.score}), playersInYourTeam: self.findPlayersInYourTeam())
-            gameViewController.updateKillsLabel()
+            gameViewController.updateScoreLabel()
             gameViewController.updateDeathsLabel()
             
-        } else {
-            gameViewController.updateTableView(playersSorted: Players.sorted(by: {$0.kills > $1.kills}))
-            gameViewController.updateKillsLabel()
-            gameViewController.updateDeathsLabel()
+        } else {//FFA
+            switch Game.gameType {
+            case 0://regular FFA
+                gameViewController.updateTableView(playersSorted: Players.sorted(by: {$0.kills > $1.kills}))
+                gameViewController.updateScoreLabel()
+                gameViewController.updateDeathsLabel()
+            case 1://oddball
+                gameViewController.updateTableView(playersSorted: Players.sorted(by: {$0.score > $1.score}))
+                gameViewController.updateScoreLabel()
+                gameViewController.updateDeathsLabel()
+            default:
+                break
+            }
+            
             
         }
     }
@@ -395,9 +527,16 @@ class GameHandler {
     func findTeamScore(team: Int) -> Int{
         var teamScore = 0
         for player in Players {
-            if player.team == team {
-                teamScore += player.kills
+            if Game.gameType == 0 {
+                if player.team == team {
+                    teamScore += player.kills
+                }
+            } else {
+                if player.team == team {
+                    teamScore += player.score
+                }
             }
+            
         }
         return teamScore
     }

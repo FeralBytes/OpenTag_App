@@ -59,6 +59,8 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string></string>

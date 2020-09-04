@@ -11,18 +11,34 @@ import UIKit
 class ShowPlusOptions: UIViewController {
 
     @IBOutlet var refillButton: UIButton!
+    @IBOutlet var claimOddballButton: UIButton!
     
     override func viewDidLoad() {
         super.viewDidLoad()
-
+        
+        if Game.gameType != 1 {
+            claimOddballButton.isHidden = true
+        }
+        
+        if handleGame.playerWithOddball.gunID == handleGame.playerSelf.gunID {
+            refillButton.isEnabled = false
+        }
+        
+        if handleGame.playerWithOddball.gunID != -1 {
+            claimOddballButton.isEnabled = false
+        }
         // Do any additional setup after loading the view.
     }
     
     @IBAction func refillButton(_ sender: Any) {
-        NFCRead.readRefillAmmoAndHealth()
-        dismiss(animated: true)
+//        NFCRead.readRefillAmmoAndHealth()
+//        dismiss(animated: true)
     }
     
+    @IBAction func claimOddballButton(_ sender: Any) {
+//        NFCRead.readOddballTag()
+//        dismiss(animated: true)
+    }
     /*
     // MARK: - Navigation
 
